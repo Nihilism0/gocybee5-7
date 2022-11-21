@@ -13,8 +13,3 @@ type Changepassword struct {
 type Findpassword struct {
 	Username string `form:"username" json:"username" binding:"required"`
 }
-type Board struct {
-	Username string `form:"username" json:"username" binding:"required"`
-	Password string `form:"password" json:"password" binding:"required"`
-	Board    string `form:"board" json:"board" binding:"required"`
-}

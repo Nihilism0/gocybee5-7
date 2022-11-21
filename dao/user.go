@@ -1,111 +1,104 @@
 package dao
 
 import (
-	"bufio"
-	"fmt"
-	"os"
-	"strings"
+	"time"
+
+	"gin_demo/model"
+	"github.com/go-redis/redis"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
-var database = make(map[string]string, 10000)
+var GlobalDb1 *gorm.DB
+var redisDb *redis.Client
 
-func DownLoad() {
-	file, err := os.Open("dao/name")
+func DataLoad() {
+	db, _ := gorm.Open(mysql.New(mysql.Config{ //配置
+		DSN: "root:123456@tcp(127.0.0.1:3306)/gindemo?charset=utf8mb4&parseTime=True&loc=Local",
+	}), &gorm.Config{
+		SkipDefaultTransaction: false,
+		NamingStrategy: schema.NamingStrategy{
+			TablePrefix:   "gindemo_",
+			SingularTable: false,
+		},
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	sqlDB, _ := db.DB()
+	sqlDB.SetConnMaxLifetime(10) //数据池
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+	GlobalDb1 = db  //全局变量GlobalDb赋值
+	TestUserCreat() //若无表单自动创建表单
+}
+
+// 根据redis配置初始化一个客户端
+func initClient() (err error) {
+	redisDb = redis.NewClient(&redis.Options{
+		Addr:     "49.234.42.190:6379", // redis地址
+		Password: "000415",             // redis密码，没有则留空
+		DB:       0,                    // 默认数据库，默认是0
+	})
+
+	//通过 *redis.Client.Ping() 来检查是否成功连接到了redis服务器
+	_, err = redisDb.Ping().Result()
 	if err != nil {
-		fmt.Println("open file err:", err)
+		return err
 	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
+	return nil
+}
 
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		k := strings.TrimRight(line, "\n")
-		k = strings.TrimSpace(line)
-		line2, err := reader.ReadString('\n')
-		v := strings.TrimRight(line2, "\n")
-		v = strings.TrimSpace(line2)
-		database[k] = v
+func RedisLoad() {
+	err := initClient()
+	if err != nil {
+		//redis连接错误
+		panic(err)
 	}
 }
 
+func TestUserCreat() {
+	GlobalDb1.AutoMigrate(&model.User{})
+}
+func TestBoardCreat() {
+	GlobalDb2.AutoMigrate(&model.RealBoard{})
+}
+
 func AddUser(username, password string) {
-	file, err := os.OpenFile("dao/name", os.O_APPEND, 0666)
-	if err != nil {
-		fmt.Println("open file failed,err:", err)
-		return
-	}
-	defer file.Close()
-	writer := bufio.NewWriter(file)
-	writer.WriteString(username + "\n" + password + "\n")
-	writer.Flush()
-	database[username] = password
+	GlobalDb1.Model(&model.User{}).Create(&model.User{
+		Username: username,
+		Password: password,
+	})
 }
 
 // 若没有这个用户返回 false，反之返回 true
 func SelectUser(username string) bool {
-	DownLoad()
-	if database[username] == "" {
-		return false
+	var u struct {
+		Username string
 	}
-	return true
+	GlobalDb1.Model(&model.User{}).Where("username = ?", username).Find(&u)
+	if u.Username == "" {
+		return false
+	} else {
+		return true
+	}
 }
 
 func SelectPasswordFromUsername(username string) string {
-	return database[username]
+	var u struct {
+		Password string
+	}
+	GlobalDb1.Model(&model.User{}).Where("username = ?", username).Find(&u)
+	return u.Password
 }
 
 func ChangePassword(username string, newpassword string) {
-	file, err := os.OpenFile("dao/name", os.O_RDWR, 0666)
-	if err != nil {
-		fmt.Println("open file err:", err)
-	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
-	i := 0
-	var k int
-	for {
-		i++
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-
-		k += len([]byte(line))
-		if i%2 == 1 {
-			line = strings.TrimRight(line, "\n")
-			if strings.Compare(line, username) == 0 {
-				line2, err := reader.ReadString('\n')
-				if err != nil {
-					break
-				}
-				k2 := len(line2)
-				for y := 0; y < k2; y++ {
-					file.WriteAt([]byte(" "), int64(k+y))
-				}
-				file.WriteAt([]byte(newpassword+"\n"), int64(k))
-				return
-			}
-		}
-	}
+	GlobalDb1.Model(&model.User{}).Where("username = ?", username).Update("password", newpassword)
 }
 
 func FindPassword(username string) string {
-	DownLoad()
-	v := database[username]
-	v = strings.TrimSpace(v)
-	return v
-}
-
-func Board(username string, say string) {
-	file, err := os.OpenFile("dao/board", os.O_RDWR|os.O_APPEND, 0666)
-	if err != nil {
-		fmt.Println("open file err:", err)
+	var u struct {
+		Password string
 	}
-	defer file.Close()
-	writer := bufio.NewWriter(file)
-	writer.WriteString(username + ":" + say + "\n")
-	writer.Flush()
+	GlobalDb1.Model(&model.User{}).Where("username = ?", username).Find(&u)
+	return u.Password
 }
